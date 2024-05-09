@@ -1,32 +1,41 @@
 FROM ubuntu:latest
 
-ENV DEBIAN_FRONTEND noninteractive
+# Setup timezone for cmake
+RUN ln -fs /usr/share/zoneinfo/Asia/Tokyo /etc/localtime
 
-ARG studio_version=2020.3.1.25
-ARG flutter_version=2.5.3
+# The package dependencies are written in pubspec.yaml
+WORKDIR /app
+COPY . .
 
-RUN apt update && apt install -y \
-    libglu1-mesa \
-    clang \
-    cmake \
-    ninja-build \
-    pkg-config \
-    libgtk-3-dev \
-    && apt-get clean \
-    && echo "Downloading Flutter..." \
-    && curl -sSL https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${flutter_version}-stable.tar.xz | tar xJ -C /opt \
-    && echo "Downloading Android Studio..." \
-    && curl -sSL https://redirector.gvt1.com/edgedl/android/studio/ide-zips/${studio_version}/android-studio-${studio_version}-linux.tar.gz | tar xz -C /opt 
-     
+RUN apt-get update && apt-get install -y git vim curl unzip wget cmake libgtk-3-dev x11-apps wget gnupg xz-utils clang ninja-build pkg-config
 
-    
-RUN echo "Creating symlinks..." && ln -s /opt/android-studio/bin/studio.sh /usr/local/bin/android_studio
+# Install Chrome
+RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - && \
+    echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list && \
+    apt-get update && \
+    apt-get install -y google-chrome-stable && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+ENV CHROME_EXECUTABLE /usr/bin/google-chrome-stable
 
-RUN useradd -m user -G plugdev \
-    && chown -R user:user /opt/flutter \
-    && chown -R user:user /opt/android-studio
+# clone flutter
+ENV FLUTTER_VERSION stable
+ARG FLUTTER_SDK=/flutter
+RUN git clone https://github.com/flutter/flutter.git $FLUTTER_SDK
+RUN cd $FLUTTER_SDK && git fetch && git checkout $FLUTTER_VERSION
+ENV PATH="${PATH}:$FLUTTER_SDK/bin:$FLUTTER_SDK/bin/cache/dart-sdk/bin"
 
-ENV PATH /opt/flutter/bin:$PATH
-ENV CHROME_EXECUTABLE /usr/bin/google-chrome
+# Chromeはrootユーザーでの実行を推奨していないためユーザー作成
+ARG USERNAME=flutteruser
+RUN useradd -ms /bin/bash $USERNAME && \
+chown -R $USERNAME /flutter /app /var && \
+chmod -R 777 /app
+# Switch to non-root user
+USER $USERNAME
 
-ENV DEBIAN_FRONTEND newt
+# FIXME: androidのセットアップはまだ
+RUN flutter channel $FLUTTER_VERSION && \
+    # flutter upgrade && \
+    flutter config --enable-web && \
+    flutter pub get && \
+    flutter pub outdated
